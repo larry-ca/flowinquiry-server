@@ -5,6 +5,7 @@ import io.flowinquiry.modules.collab.service.event.MailSettingsUpdatedEvent;
 import io.flowinquiry.modules.usermanagement.service.dto.UserDTO;
 import jakarta.annotation.PostConstruct;
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -132,7 +133,7 @@ public class MailService {
 
     private void sendEmailSync(
             JavaMailSender sender,
-            String to,
+            String toRecipients,
             String subject,
             String content,
             boolean isMultipart,
@@ -141,22 +142,23 @@ public class MailService {
                 "Send email[multipart '{}' and html '{}'] to '{}' with subject '{}' and content={}",
                 isMultipart,
                 isHtml,
-                to,
+                toRecipients,
                 subject,
                 content);
 
         try {
+            InternetAddress[] toAddressed = InternetAddress.parse(toRecipients);
             MimeMessage mimeMessage = sender.createMimeMessage();
             MimeMessageHelper message =
                     new MimeMessageHelper(mimeMessage, isMultipart, StandardCharsets.UTF_8.name());
-            message.setTo(to);
+            message.setTo(toAddressed);
             message.setFrom(from);
             message.setSubject(subject);
             message.setText(content, isHtml);
             sender.send(mimeMessage);
-            LOG.debug("Sent email to User '{}'", to);
+            LOG.debug("Sent email to User '{}'", toRecipients);
         } catch (MailException | MessagingException e) {
-            LOG.warn("Email could not be sent to user '{}'", to, e);
+            LOG.warn("Email could not be sent to user '{}'", toRecipients, e);
         }
     }
 

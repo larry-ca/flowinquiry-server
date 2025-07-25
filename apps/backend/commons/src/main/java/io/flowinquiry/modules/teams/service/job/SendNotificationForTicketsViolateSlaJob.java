@@ -6,16 +6,18 @@ import static j2html.TagCreator.p;
 import static j2html.TagCreator.strong;
 import static j2html.TagCreator.text;
 
-import io.flowinquiry.modules.collab.EmailContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.flowinquiry.modules.collab.domain.Notification;
 import io.flowinquiry.modules.collab.domain.NotificationType;
-import io.flowinquiry.modules.collab.service.MailService;
+import io.flowinquiry.modules.collab.service.EmailJobService;
 import io.flowinquiry.modules.shared.service.cache.DeduplicationCacheService;
 import io.flowinquiry.modules.teams.domain.Ticket;
 import io.flowinquiry.modules.teams.domain.WorkflowTransitionHistory;
 import io.flowinquiry.modules.teams.service.TeamService;
 import io.flowinquiry.modules.teams.service.WorkflowTransitionHistoryService;
 import io.flowinquiry.modules.usermanagement.domain.User;
+import io.flowinquiry.modules.usermanagement.service.dto.UserDTO;
 import io.flowinquiry.modules.usermanagement.service.mapper.UserMapper;
 import io.flowinquiry.utils.Obfuscator;
 import java.time.Duration;
@@ -24,11 +26,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Profile;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -48,29 +48,29 @@ public class SendNotificationForTicketsViolateSlaJob {
 
     private final WorkflowTransitionHistoryService workflowTransitionHistoryService;
 
-    private final MailService mailService;
+    private final EmailJobService emailJobService;
 
     private final DeduplicationCacheService deduplicationCacheService;
 
     private final UserMapper userMapper;
 
-    private final MessageSource messageSource;
+    private final ObjectMapper objectMapper;
 
     public SendNotificationForTicketsViolateSlaJob(
             SimpMessagingTemplate messageTemplate,
             TeamService teamService,
             WorkflowTransitionHistoryService workflowTransitionHistoryService,
-            MailService mailService,
+            EmailJobService emailJobService,
             DeduplicationCacheService deduplicationCacheService,
             UserMapper userMapper,
-            MessageSource messageSource) {
+            ObjectMapper objectMapper) {
         this.messageTemplate = messageTemplate;
         this.teamService = teamService;
         this.workflowTransitionHistoryService = workflowTransitionHistoryService;
-        this.mailService = mailService;
+        this.emailJobService = emailJobService;
         this.deduplicationCacheService = deduplicationCacheService;
         this.userMapper = userMapper;
-        this.messageSource = messageSource;
+        this.objectMapper = objectMapper;
     }
 
     @Scheduled(cron = "0 0/1 * * * ?")
@@ -147,26 +147,43 @@ public class SendNotificationForTicketsViolateSlaJob {
                 messageTemplate.convertAndSendToUser(
                         String.valueOf(recipient.getId()), "/queue/notifications", notification);
 
-                EmailContext emailContext =
-                        new EmailContext(
-                                        Locale.forLanguageTag("en"),
-                                        mailService.getBaseUrl(),
-                                        messageSource)
-                                .setToUser(userMapper.toDto(recipient))
-                                .setSubject(
-                                        "email.ticket.sla.violation.subject",
-                                        ticket.getRequestTitle(),
-                                        ticket.getTeam().getName())
-                                .addVariable("requestTitle", ticket.getRequestTitle())
-                                .addVariable(
-                                        "obfuscatedTeamId",
-                                        Obfuscator.obfuscate(ticket.getTeam().getId()))
-                                .addVariable(
-                                        "obfuscatedTicketId", Obfuscator.obfuscate(ticket.getId()))
-                                .addVariable("slaDueDate", formattedSlaDueDate)
-                                .setTemplate("mail/violatedSlaTicketEmail");
+                //                EmailContext emailContext =
+                //                        new EmailContext(
+                //                                        Locale.forLanguageTag("en"),
+                //                                        mailService.getBaseUrl(),
+                //                                        messageSource)
+                //                                .setToUser(userMapper.toDto(recipient))
+                //                                .setSubject(
+                //                                        "email.ticket.sla.violation.subject",
+                //                                        ticket.getRequestTitle(),
+                //                                        ticket.getTeam().getName())
+                //                                .addVariable("requestTitle",
+                // ticket.getRequestTitle())
+                //                                .addVariable(
+                //                                        "obfuscatedTeamId",
+                //
+                // Obfuscator.obfuscate(ticket.getTeam().getId()))
+                //                                .addVariable(
+                //                                        "obfuscatedTicketId",
+                // Obfuscator.obfuscate(ticket.getId()))
+                //                                .addVariable("slaDueDate", formattedSlaDueDate)
+                //                                .setTemplate("mail/violatedSlaTicketEmail");
 
-                mailService.sendEmail(emailContext);
+                UserDTO userDto = userMapper.toDto(recipient);
+                ObjectNode node = objectMapper.createObjectNode();
+                node.put("ticketTitle", ticket.getRequestTitle());
+                node.put("teamName", ticket.getTeam().getName());
+                node.put("obfuscatedTeamId", Obfuscator.obfuscate(ticket.getTeam().getId()));
+                node.put("obfuscatedTicketId", Obfuscator.obfuscate(ticket.getId()));
+                node.put("slaDueDate", formattedSlaDueDate);
+
+                emailJobService.enqueueEmailJob(
+                        userDto.getFullName(),
+                        userDto.getEmail(),
+                        "en",
+                        "mail/violatedSlaTicketEmail",
+                        node);
+                //                mailService.sendEmail(emailContext);
 
                 // ✅ Store Key in Deduplication Cache
                 deduplicationCacheService.put(cacheKey, Duration.ofHours(24));

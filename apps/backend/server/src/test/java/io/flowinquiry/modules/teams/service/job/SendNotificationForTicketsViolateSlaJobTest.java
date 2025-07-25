@@ -9,10 +9,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import io.flowinquiry.modules.collab.EmailContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.flowinquiry.modules.collab.domain.Notification;
 import io.flowinquiry.modules.collab.domain.NotificationType;
-import io.flowinquiry.modules.collab.service.MailService;
+import io.flowinquiry.modules.collab.service.EmailJobService;
 import io.flowinquiry.modules.shared.service.cache.DeduplicationCacheService;
 import io.flowinquiry.modules.teams.domain.Team;
 import io.flowinquiry.modules.teams.domain.Ticket;
@@ -35,7 +35,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.MessageSource;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,7 +44,7 @@ public class SendNotificationForTicketsViolateSlaJobTest {
 
     @Mock private SimpMessagingTemplate messageTemplate;
 
-    @Mock private MailService mailService;
+    @Mock private EmailJobService emailJobService;
 
     @Mock private DeduplicationCacheService deduplicationCacheService;
 
@@ -53,7 +52,7 @@ public class SendNotificationForTicketsViolateSlaJobTest {
 
     @Mock private UserMapper userMapper;
 
-    @Mock private MessageSource messageSource;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private SendNotificationForTicketsViolateSlaJob job;
 
@@ -64,10 +63,10 @@ public class SendNotificationForTicketsViolateSlaJobTest {
                         messageTemplate,
                         teamService,
                         workflowTransitionHistoryService,
-                        mailService,
+                        emailJobService,
                         deduplicationCacheService,
                         userMapper,
-                        messageSource);
+                        objectMapper);
     }
 
     @Test
@@ -171,7 +170,8 @@ public class SendNotificationForTicketsViolateSlaJobTest {
         }
 
         // Verify emails sent - just verify the method was called
-        verify(mailService, times(2)).sendEmail(any(EmailContext.class));
+        verify(emailJobService, times(2))
+                .enqueueEmailJob(anyString(), anyString(), anyString(), anyString(), any());
 
         // Verify deduplication cache entries
         verify(deduplicationCacheService, times(2)).put(anyString(), any(Duration.class));
@@ -190,7 +190,8 @@ public class SendNotificationForTicketsViolateSlaJobTest {
         verify(workflowTransitionHistoryService, never()).escalateTransition(anyLong());
         verify(teamService, never()).getTeamManagers(anyLong());
         verify(messageTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
-        verify(mailService, never()).sendEmail(any(EmailContext.class));
+        verify(emailJobService, never())
+                .enqueueEmailJob(anyString(), anyString(), anyString(), anyString(), any());
         verify(deduplicationCacheService, never()).put(anyString(), any(Duration.class));
     }
 
@@ -281,8 +282,8 @@ public class SendNotificationForTicketsViolateSlaJobTest {
         assert capturedNotification.getContent().contains("Test Ticket");
         assert !capturedNotification.getIsRead();
 
-        // Verify email sent - just verify the method was called
-        verify(mailService, times(1)).sendEmail(any(EmailContext.class));
+        verify(emailJobService, times(1))
+                .enqueueEmailJob(anyString(), anyString(), anyString(), anyString(), any());
 
         // Verify deduplication cache entry
         verify(deduplicationCacheService, times(1)).put(anyString(), any(Duration.class));
@@ -360,7 +361,8 @@ public class SendNotificationForTicketsViolateSlaJobTest {
 
         // Verify no notifications are sent for duplicate violations
         verify(messageTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
-        verify(mailService, never()).sendEmail(any(EmailContext.class));
+        verify(emailJobService, never())
+                .enqueueEmailJob(anyString(), anyString(), anyString(), anyString(), any());
         verify(deduplicationCacheService, never()).put(anyString(), any(Duration.class));
     }
 }
